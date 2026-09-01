@@ -29,18 +29,75 @@ function findAnchor(sf: SourceFile): Node {
  * request.
  */
 function hasRequestHandler(sf: SourceFile): boolean {
+  // Existing exported handlers
   for (const fn of sf.getFunctions()) {
     if (!fn.isExported()) continue;
+
     if (fn.isDefaultExport()) return true;
+
     const name = fn.getName();
+
     if (name && HANDLER_NAME_RE.test(name)) return true;
   }
+
+  // Existing exported handler variables
   for (const statement of sf.getVariableStatements()) {
     if (!statement.isExported()) continue;
+
     for (const decl of statement.getDeclarations()) {
       if (HANDLER_NAME_RE.test(decl.getName())) return true;
     }
   }
+
+  // Express / Fastify webhook routes
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expression = call.getExpression().getText();
+
+    // Express: app.post('/webhooks/razorpay', ...)
+    // Express: router.post('/webhooks/razorpay', ...)
+    if (/^(app|router)\.(post|put|use)$/.test(expression)) {
+      const firstArg = call.getArguments()[0];
+
+      if (!firstArg) continue;
+
+      const route = firstArg
+        .getText()
+        .replace(/^['"`]|['"`]$/g, '');
+
+      if (/webhook/i.test(route)) return true;
+    }
+
+    // Fastify: fastify.post('/webhooks/razorpay', ...)
+    if (expression === 'fastify.post') {
+      const firstArg = call.getArguments()[0];
+
+      if (!firstArg) continue;
+
+      const route = firstArg
+        .getText()
+        .replace(/^['"`]|['"`]$/g, '');
+
+      if (/webhook/i.test(route)) return true;
+    }
+
+    // Fastify: fastify.route({ method: 'POST', url: '/webhooks/razorpay', ... })
+    if (expression === 'fastify.route') {
+      const firstArg = call.getArguments()[0];
+
+      if (!firstArg) continue;
+
+      const text = firstArg.getText();
+
+      if (
+        /method\s*:\s*['"`]POST['"`]/i.test(text) &&
+        /url\s*:\s*['"`][^'"`]*webhook[^'"`]*['"`]/i.test(text) &&
+        /handler\s*:/i.test(text)
+      ) {
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 
@@ -86,7 +143,10 @@ export const webhookSignatureDetector: Detector = (ctx): Finding[] => {
 
   // Three independent signals must agree before this fires: it is named or
   // shaped like a webhook, it serves requests, and it consumes the body.
-  const looksLikeWebhook = /webhook/i.test(ctx.relPath) || SIGNATURE_HEADER_RE.test(text);
+  const looksLikeWebhook =
+  /webhook/i.test(ctx.relPath) ||
+  /webhook/i.test(text) ||
+  SIGNATURE_HEADER_RE.test(text);
   if (!looksLikeWebhook) return [];
   if (!hasRequestHandler(sf)) return [];
   if (!readsRequestBody(sf)) return [];
