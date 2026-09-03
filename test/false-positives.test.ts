@@ -46,6 +46,74 @@ function analyze(code: string, filePath = '/app/page.tsx'): string[] {
  * helper, punishing exactly the people who did the right thing.
  */
 describe('false positives on correct code', () => {
+
+  it('MP006: payment SDK plus unrelated GitHub webhook stays silent', () => {
+  expect(
+    analyze(
+      `
+        import express from 'express';
+        import Stripe from 'stripe';
+
+        const app = express();
+        const stripe = new Stripe('sk_test');
+
+        app.post('/webhooks/github', async (req, res) => {
+          const event = req.body;
+          await handleGithubEvent(event);
+          res.json({ ok: true });
+        });
+
+        const stripeClient = stripe;
+      `,
+      '/app/routes/github.ts',
+      ),
+    ).toEqual([]);
+  });
+
+  
+  it('MP006: GitHub webhook in a file that also imports Stripe', () => {
+  expect(
+    analyze(
+      `
+        import express from 'express';
+        import Stripe from 'stripe';
+
+        const app = express();
+        const stripe = new Stripe('sk_test');
+
+        app.post('/webhooks/github', async (req, res) => {
+          const event = req.body;
+
+          await handleGithubEvent(event);
+
+          res.json({ ok: true });
+        });
+      `,
+      '/app/webhooks/github.ts',
+      ),
+    ).toEqual([]);
+  });
+
+
+  it('MP006: GitHub webhook in a file that also imports Stripe', () => {
+  expect(
+    analyze(`
+      import Stripe from 'stripe';
+
+      const stripe = new Stripe('sk_test');
+
+      app.post('/webhooks/github', async (req, res) => {
+        const event = req.body;
+
+        await handleGithubEvent(event);
+
+        res.json({ ok: true });
+      });
+      `, '/app/webhooks/github.ts'),
+    ).toEqual([]);
+  });
+
+
   it('React state setter holding a paid status', () => {
     expect(
       analyze(`'use client';
