@@ -149,7 +149,9 @@ function findWebhookRoutes(sf: SourceFile): HandlerInfo[] {
       const routeMatch =
         /url\s*:\s*['"`]([^'"`]*)['"`]/i.exec(configText);
 
-      if (!methodMatches || !routeMatch || !routeMatch[1] || !/webhook/i.test(routeMatch[1])) {
+      const route = routeMatch?.[1];
+
+      if (!methodMatches || !route || !/webhook/i.test(route)) {
         continue;
       }
 
